@@ -83,8 +83,20 @@ class DetectorBackboneWithFPN(nn.Module):
         # Add THREE lateral 1x1 conv and THREE output 3x3 conv layers.
         self.fpn_params = nn.ModuleDict()
 
-        # Replace "pass" statement with your code
-        pass
+        # 获取 c3, c4, c5 的通道数
+        c3_channels = dummy_out["c3"].shape[1]
+        c4_channels = dummy_out["c4"].shape[1]
+        c5_channels = dummy_out["c5"].shape[1]
+
+        # 定义横向连接的 1x1 卷积层
+        self.fpn_params["lateral_c3"] = nn.Conv2d(c3_channels, out_channels, kernel_size=1, stride=1, padding=0)
+        self.fpn_params["lateral_c4"] = nn.Conv2d(c4_channels, out_channels, kernel_size=1, stride=1, padding=0)
+        self.fpn_params["lateral_c5"] = nn.Conv2d(c5_channels, out_channels, kernel_size=1, stride=1, padding=0)
+
+        # 定义输出的 3x3 卷积层
+        self.fpn_params["output_p3"] = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.fpn_params["output_p4"] = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.fpn_params["output_p5"] = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -109,9 +121,27 @@ class DetectorBackboneWithFPN(nn.Module):
         # (c3, c4, c5) and FPN conv layers created above.                    #
         # HINT: Use `F.interpolate` to upsample FPN features.                #
         ######################################################################
+        c3, c4, c5 = backbone_feats["c3"], backbone_feats["c4"], backbone_feats["c5"]
 
-        # Replace "pass" statement with your code
-        pass
+        # 对 c3, c4, c5 应用横向连接的 1x1 卷积
+        lateral_c3 = self.fpn_params["lateral_c3"](c3)
+        lateral_c4 = self.fpn_params["lateral_c4"](c4)
+        lateral_c5 = self.fpn_params["lateral_c5"](c5)
+
+        # 从高层到低层构建 FPN
+        # p5 直接由 lateral_c5 经过 3x3 卷积得到
+        p5 = self.fpn_params["output_p5"](lateral_c5)
+
+        # p4 由 lateral_c4 和上采样后的 p5 相加，再经过 3x3 卷积得到
+        p4 = lateral_c4 + F.interpolate(p5, size=lateral_c4.shape[2:], mode="nearest")
+        p4 = self.fpn_params["output_p4"](p4)
+
+        # p3 由 lateral_c3 和上采样后的 p4 相加，再经过 3x3 卷积得到
+        p3 = lateral_c3 + F.interpolate(p4, size=lateral_c3.shape[2:], mode="nearest")
+        p3 = self.fpn_params["output_p3"](p3)
+
+        # 返回 FPN 的特征图
+        fpn_feats = {"p3": p3, "p4": p4, "p5": p5}
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -156,8 +186,22 @@ def get_fpn_location_coords(
         ######################################################################
         # TODO: Implement logic to get location co-ordinates below.          #
         ######################################################################
-        # Replace "pass" statement with your code
-        pass
+        # Get the height and width of the feature map
+        H, W = feat_shape[2], feat_shape[3]
+
+        # Generate grid indices (i, j) for the feature map
+        i_indices = torch.arange(H, dtype=dtype, device=device)
+        j_indices = torch.arange(W, dtype=dtype, device=device)
+
+        # Create a meshgrid of (i, j) indices
+        i_grid, j_grid = torch.meshgrid(i_indices, j_indices, indexing="ij")
+
+        # Calculate the center coordinates (xc, yc)
+        xc = (i_grid + 0.5) * level_stride
+        yc = (j_grid + 0.5) * level_stride
+
+        # Stack (xc, yc) into a tensor of shape (H * W, 2)
+        location_coords[level_name] = torch.stack([xc.flatten(), yc.flatten()], dim=1)
         ######################################################################
         #                             END OF YOUR CODE                       #
         ######################################################################
@@ -183,7 +227,7 @@ def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float = 0.5):
     if (not boxes.numel()) or (not scores.numel()):
         return torch.zeros(0, dtype=torch.long)
 
-    keep = None
+    keep = []
     #############################################################################
     # TODO: Implement non-maximum suppression which iterates the following:     #
     #       1. Select the highest-scoring box among the remaining ones,         #
@@ -195,8 +239,26 @@ def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float = 0.5):
     # HINT: You can refer to the torchvision library code:                      #
     # github.com/pytorch/vision/blob/main/torchvision/csrc/ops/cpu/nms_kernel.cpp
     #############################################################################
-    # Replace "pass" statement with your code
-    pass
+    from two_stage_detector import iou
+    ious = iou(boxes, boxes)
+
+    count = boxes.shape[0]
+    
+    while count > 0:
+        # 1. Select the highest-scoring box among the remaining ones
+        max_score_idx = torch.argmax(scores)
+        max_score_box = boxes[max_score_idx]
+        keep.append(max_score_box)
+        count -= 1
+
+        # 2. Eliminate boxes with IoU > threshold
+        mask = ious <= iou_threshold
+        boxes = boxes[:, mask]
+        scores = scores[:, mask]
+        ious = ious[:, mask]
+        count = boxes.shape[0]
+
+    keep = torch.stack(keep, dim=0)
     #############################################################################
     #                              END OF YOUR CODE                             #
     #############################################################################
