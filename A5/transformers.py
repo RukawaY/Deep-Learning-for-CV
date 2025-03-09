@@ -32,8 +32,8 @@ def generate_token_dict(vocab):
     # vocab to 0 and the last element in the vocab to len(vocab), and the        #
     # elements in between as consequetive number.                                #
     ##############################################################################
-    # Replace "pass" statement with your code
-    pass
+    for idx, word in enumerate(vocab):
+        token_dict[word] = idx
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -73,8 +73,12 @@ def prepocess_input_sequence(
     # from token_dict. For special tokens present in the input string, assign an
     # appropriate value for the complete token.
     ##############################################################################
-    # Replace "pass" statement with your code
-    pass
+    for word in input_str.split():
+        if word[0] >= '0' and word[0] <= '9':
+            for digit in word:
+                out.append(token_dict[digit])
+        else:
+            out.append(token_dict[word])
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -115,8 +119,26 @@ def scaled_dot_product_two_loop_single(
     # sum of values using the matrix-vector product. This single vector computed  #
     # using weighted sum becomes an output to the Kth query vector                #
     ###############################################################################
-    # Replace "pass" statement with your code
-    pass
+    K, M = query.shape
+    out = torch.zeros_like(query)  # Placeholder for the output
+
+    # First loop: iterate over each query
+    for i in range(K):
+        # Second loop: compute dot product with each key
+        scores = torch.zeros(K)
+        for j in range(K):
+            scores[j] = torch.dot(query[i], key[j]) / (M ** 0.5)
+        
+        # Apply softmax to get attention weights
+        attention_weights = F.softmax(scores, dim=0)
+        
+        # Compute weighted sum of values
+        weighted_sum = torch.zeros(M)
+        for j in range(K):
+            weighted_sum += attention_weights[j] * value[j]
+        
+        # Assign the weighted sum to the output
+        out[i] = weighted_sum
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -133,7 +155,7 @@ def scaled_dot_product_two_loop_batch(
     description in TODO for implementation.
 
     args:
-        query: a Tensor of shape (N,K, M) where N is the batch size, K is the
+        query: a Tensor of shape (N, K, M) where N is the batch size, K is the
             sequence length and  M is the sequence embeding dimension
 
         key: a Tensor of shape (N, K, M) where N is the batch size, K is the
@@ -162,8 +184,13 @@ def scaled_dot_product_two_loop_batch(
     # use them to compute weighted average of value matrix.                       #
     # Hint: look at torch.bmm                                                     #
     ###############################################################################
-    # Replace "pass" statement with your code
-    pass
+    key = key.transpose(1, 2)
+
+    weights = torch.bmm(query, key) / (M ** 0.5)
+
+    sf_weights = F.softmax(weights, dim=-1)
+
+    out = torch.bmm(sf_weights, value)
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -217,17 +244,21 @@ def scaled_dot_product_no_loop_batch(
     # weights can then be softmaxed to compute the final weighted sum of values   #
     # Hint: look at torch.bmm and torch.masked_fill                               #
     ###############################################################################
-    # Replace "pass" statement with your code
-    pass
+    key = key.transpose(1, 2)
+
+    weights = torch.bmm(query, key) / (M ** 0.5)
+
     if mask is not None:
         ##########################################################################
         # TODO: Apply the mask to the weight matrix by assigning -1e9 to the     #
         # positions where the mask value is True, otherwise keep it as it is.    #
         ##########################################################################
-        # Replace "pass" statement with your code
-        pass
-    # Replace "pass" statement with your code
-    pass
+        weights = torch.masked_fill(weights, mask, -1e9)
+
+    
+    sf_weights = F.softmax(weights, dim=-1)
+
+    y = torch.bmm(sf_weights, value)
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -267,8 +298,14 @@ class SelfAttention(nn.Module):
         # Please use the same names for query, key and value transformations     #
         # as given above. self.q, self.k, and self.v respectively.               #
         ##########################################################################
-        # Replace "pass" statement with your code
-        pass
+        self.q = nn.Linear(dim_in, dim_q)
+        self.k = nn.Linear(dim_in, dim_q)
+        self.v = nn.Linear(dim_in, dim_v)
+
+        for layer in [self.q, self.k, self.v]:
+            c = (6 / (layer.in_features + layer.out_features)) ** 0.5
+            nn.init.uniform_(layer.weight, -c, c)
+            nn.init.zeros_(layer.bias)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -302,8 +339,11 @@ class SelfAttention(nn.Module):
         # of output weight matrix from self_attention_no_loop_batch to the       #
         # variable self.weights_softmax                                          #
         ##########################################################################
-        # Replace "pass" statement with your code
-        pass
+        q = self.q(query)
+        k = self.k(key)
+        v = self.v(value)
+
+        y, self.weights_softmax = scaled_dot_product_no_loop_batch(q, k, v, mask)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -353,8 +393,17 @@ class MultiHeadAttention(nn.Module):
         # dim_in. Initialize the weights using the strategy mentioned in         #
         # SelfAttention.                                                         #
         ##########################################################################
-        # Replace "pass" statement with your code
-        pass
+        modules = []
+        for i in range(num_heads):
+            modules.append(SelfAttention(dim_in, dim_out, dim_out))
+        self.layers = nn.ModuleList(modules)
+
+        self.linear = nn.Linear(num_heads * dim_out, dim_in)
+
+        for layer in [self.linear]:
+            c = (6 / (layer.in_features + layer.out_features)) ** 0.5
+            nn.init.uniform_(layer.weight, -c, c)
+            nn.init.zeros_(layer.bias)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -397,8 +446,13 @@ class MultiHeadAttention(nn.Module):
         # output. Concatenate this list if tensors and pass them through the     #
         # nn.Linear mapping function defined in the initialization step.         #
         ##########################################################################
-        # Replace "pass" statement with your code
-        pass
+        outputs = []
+
+        for head in self.layers:
+            outputs.append(head.forward(query, key, value, mask))
+
+        y = torch.cat(outputs, dim=-1)
+        y = self.linear(y)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -434,8 +488,8 @@ class LayerNormalization(nn.Module):
         # with appropriate dimensions. Dont forget to encapsulate these scale and#
         # shift initializations with nn.Parameter                                #
         ##########################################################################
-        # Replace "pass" statement with your code
-        pass
+        self.scale = nn.Parameter(torch.ones(emb_dim))
+        self.shift = nn.Parameter(torch.zeros(emb_dim))
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -461,8 +515,10 @@ class LayerNormalization(nn.Module):
         # these and shift this normalized input. Don't use torch.std to compute  # 
         # the standard deviation.                                                #
         ##########################################################################
-        # Replace "pass" statement with your code
-        pass
+        mean = x.mean(dim=-1, keepdim=True)
+        std = (x - mean).pow(2).mean(dim=-1, keepdim=True).sqrt()
+        y = (x - mean) / (std + self.epsilon)
+        y = self.scale * y + self.shift
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -499,8 +555,14 @@ class FeedForwardBlock(nn.Module):
         # HINT: Will the shape of input and output shape of the FeedForwardBlock #
         # change?                                                                #
         ##########################################################################
-        # Replace "pass" statement with your code
-        pass
+        self.mlp1 = nn.Linear(inp_dim, hidden_dim_feedforward)
+        self.relu = nn.ReLU()
+        self.mlp2 = nn.Linear(hidden_dim_feedforward, inp_dim)
+
+        for layer in [self.mlp1, self.mlp2]:
+            c = (6 / (layer.in_features + layer.out_features)) ** 0.5
+            nn.init.uniform_(layer.weight, -c, c)
+            nn.init.zeros_(layer.bias)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -521,8 +583,7 @@ class FeedForwardBlock(nn.Module):
         # a forward pass. You should be using a ReLU layer after the first MLP and#
         # no activation after the second MLP                                      #
         ###########################################################################
-        # Replace "pass" statement with your code
-        pass
+        y = self.mlp2(self.relu(self.mlp1(x)))
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -596,8 +657,11 @@ class EncoderBlock(nn.Module):
         #    feedforward_dim                                                     #
         # 4. A Dropout layer with given dropout parameter                        #
         ##########################################################################
-        # Replace "pass" statement with your code
-        pass
+        out_dim = emb_dim // num_heads
+        self.attention = MultiHeadAttention(num_heads, emb_dim, out_dim)
+        self.layer_norm = LayerNormalization(emb_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.feedforward = FeedForwardBlock(emb_dim, feedforward_dim)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -612,6 +676,9 @@ class EncoderBlock(nn.Module):
             x: a Tensor of shape (N, K, M) as input sequence
         returns:
             y: a Tensor of shape (N, K, M) as the output of the forward pass
+
+        inp - multi_head_attention - out1 - layer_norm(out1 + inp) - dropout - out2 \ 
+        - feedforward - out3 - layer_norm(out3 + out2) - dropout - out
         """
         y = None
         ##########################################################################
@@ -621,8 +688,13 @@ class EncoderBlock(nn.Module):
         # Need paper to complete the rest of the forward pass. You can also take #
         # reference from the architecture written in the fucntion documentation. #
         ##########################################################################
-        # Replace "pass" statement with your code
-        pass
+        out1 = self.attention.forward(x, x, x)
+
+        out2 = self.dropout(self.layer_norm.forward(out1 + x))
+
+        out3 = self.feedforward.forward(out2)
+
+        y = self.dropout(self.layer_norm.forward(out3 + out2))
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -654,8 +726,8 @@ def get_subsequent_mask(seq):
     # False where we don't have to apply the mask.                                #
     #                                                                             #
     ###############################################################################
-    # Replace "pass" statement with your code
-    pass
+    N, K = seq.shape
+    mask = torch.triu(torch.ones((K, K)), diagonal=1).bool()
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -728,7 +800,6 @@ class DecoderBlock(nn.Module):
         self.norm2 = None
         self.norm3 = None
         self.dropout = None
-        self.feed_forward = None
         ##########################################################################
         # TODO: Initialize the following layers:                                 #
         # 1. Two MultiheadAttention layers with num_heads number of heads, emb_dim
@@ -739,9 +810,13 @@ class DecoderBlock(nn.Module):
         # 3. LayerNormalization layers after each of the block                   #
         # 4. Dropout after each of the block                                     #
         ##########################################################################
-
-        # Replace "pass" statement with your code
-        pass
+        self.attention_self = MultiHeadAttention(num_heads, emb_dim, emb_dim // num_heads)
+        self.attention_cross = MultiHeadAttention(num_heads, emb_dim, emb_dim // num_heads)
+        self.feed_forward = FeedForwardBlock(emb_dim, feedforward_dim)
+        self.norm1 = LayerNormalization(emb_dim)
+        self.norm2 = LayerNormalization(emb_dim)
+        self.norm3 = LayerNormalization(emb_dim)
+        self.dropout = nn.Dropout(dropout)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -760,6 +835,11 @@ class DecoderBlock(nn.Module):
         in input as enc_inp which is the encoder output and a tensor dec_inp which
         is the target sequence shifted by one in case of training and an initial
         token "BOS" during inference
+
+        inp - masked_multi_head_attention - out1 - layer_norm(inp + out1) - \
+        dropout - (out2 and enc_out) -  multi_head_attention - out3 - \
+        layer_norm(out3 + out2) - dropout - out4 - feed_forward - out5 - \
+        layer_norm(out5 + out4) - dropout - out
         """
         y = None
         ##########################################################################
@@ -770,8 +850,12 @@ class DecoderBlock(nn.Module):
         # Attention is All you need paper to implenment the rest of the forward  #
         # pass. Don't forget to apply the residual connections for different layers.
         ##########################################################################
-        # Replace "pass" statement with your code
-        pass
+        out1 = self.attention_self.forward(dec_inp, dec_inp, dec_inp, mask)
+        out2 = self.dropout(self.norm1.forward(dec_inp + out1))
+        out3 = self.attention_cross.forward(out2, enc_inp, enc_inp)
+        out4 = self.dropout(self.norm2.forward(out3 + out2))
+        out5 = self.feed_forward.forward(out4)
+        y = self.dropout(self.norm3.forward(out5 + out4))
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -884,8 +968,10 @@ def position_encoding_simple(K: int, M: int) -> Tensor:
     # K with nth element as n/K, where n starts from 0. Replicate this tensor M  #
     # times to create a tensor of the required output shape                      #
     ##############################################################################
-    # Replace "pass" statement with your code
-    pass
+    y = torch.zeros(K, M)
+    for i in range(K):
+        y[i, :] = i/K
+    y = y.unsqueeze(0)
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -912,8 +998,19 @@ def position_encoding_sinusoid(K: int, M: int) -> Tensor:
     # follow the equations given in the notebook. Make sure to keep in mind the  #
     # alternating sines and cosines along the embedding dimension M.             #
     ##############################################################################
-    # Replace "pass" statement with your code
-    pass
+    y = torch.zeros(K, M)
+    import math
+
+    for p in range(K):
+        for i in range(M):
+            if i % 2 == 0:
+                a = i // M
+                y[p, i] = math.sin(p / 10000 ** a)
+            else:
+                a = (i - 1) // M
+                y[p, i] = math.cos(p / 10000 ** a)
+
+    y = y.unsqueeze(0)
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -962,8 +1059,7 @@ class Transformer(nn.Module):
         # emb_dim that will stay the same throughout our model. Please use the   #
         # name of this layer as self.emb_layer                                   #
         ##########################################################################
-        # Replace "pass" statement with your code
-        pass
+        self.emb_layer = nn.Embedding(vocab_len, emb_dim)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -1016,8 +1112,11 @@ class Transformer(nn.Module):
         # the values of the target(a_emb_inp)
         # Hint: the mask shape will depend on the Tensor ans_b
         ##########################################################################
-        # Replace "pass" statement with your code
-        pass
+        enc_out = self.encoder.forward(q_emb_inp)
+        mask = get_subsequent_mask(ans_b[:, :-1])
+        dec_out = self.decoder.forward(a_emb_inp, enc_out, mask)
+        N, O, V = dec_out.shape
+        dec_out = dec_out.view(N * O, V)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
