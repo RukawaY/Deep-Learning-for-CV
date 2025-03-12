@@ -40,8 +40,10 @@ def compute_saliency_maps(X, y, model):
     # the gradients with a backward pass.                                        #
     # Hint: X.grad.data stores the gradients                                     #
     ##############################################################################
-    # Replace "pass" statement with your code
-    pass
+    y_out = model(X)
+    loss = torch.nn.functional.cross_entropy(y_out, y)
+    loss.backward()
+    saliency, _ = X.grad.data.abs().max(dim=1)
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -83,8 +85,23 @@ def make_adversarial_attack(X, target_y, model, max_iter=100, verbose=True):
     # attack in fewer than 100 iterations of gradient ascent.                    #
     # You can print your progress over iterations to check your algorithm.       #
     ##############################################################################
-    # Replace "pass" statement with your code
-    pass
+    for i in range(max_iter):
+        # Compute the score of the target class
+        y_out = model(X_adv)
+
+        loss = torch.nn.functional.cross_entropy(y_out, torch.tensor([target_y]).to(y_out.device))
+        loss.backward()
+
+        # Normalize the gradient
+        grad = X_adv.grad.data
+        grad_norm = torch.norm(grad, p=2)
+        grad = grad * learning_rate / grad_norm
+
+        X_adv.data -= grad
+        X_adv.grad.data.zero_()
+
+        if verbose:
+            print(f"Iteration {i}: Loss = {loss.item():.4f}")
     ##############################################################################
     #                             END OF YOUR CODE                               #
     ##############################################################################
@@ -118,8 +135,15 @@ def class_visualization_step(img, target_y, model, **kwargs):
     # the generated image using gradient ascent & reset img.grad to zero   #
     # after each step.                                                     #
     ########################################################################
-    # Replace "pass" statement with your code
-    pass
+    model.zero_grad()
+    
+    output = model(img)
+    syI = output[0, target_y]
+    loss = syI - l2_reg * torch.norm(img.data, p=2)
+    loss.backward()
+
+    img.data += learning_rate * img.grad.data
+    img.grad.zero_()
     ########################################################################
     #                             END OF YOUR CODE                         #
     ########################################################################
