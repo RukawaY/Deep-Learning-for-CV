@@ -92,6 +92,8 @@ def blur_image(X, sigma=1):
 def check_scipy():
     import scipy
 
+    print(scipy.__version__)
+
     vnum = int(scipy.__version__.split(".")[1])
     major_vnum = int(scipy.__version__.split(".")[0])
 
